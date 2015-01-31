@@ -3,20 +3,17 @@
 void testApp::setup() {
     img.loadImage("Jump.jpg");
     seamCarver.setup(img.width, img.height, img.bpp / 8);
+    ofSetFrameRate(30);
 }
 
 void testApp::update() {
-    
+    img.setFromPixels(seamCarver.seamCarve(img, true,false), img.getWidth()-1, img.getHeight(), OF_IMAGE_COLOR);
+
 }
 
 void testApp::draw() {
     img.draw(0,0);
     ofDrawBitmapString(ofToString(ofGetFrameRate())+"fps", 10, 15);
 }
-void testApp::mousePressed(int x, int y, int button){
-    if(x < img.width && y < img.height) {
-        img.setFromPixels(seamCarver.seamCarve(img, x, y),
-                          x, y, OF_IMAGE_COLOR);
-    }
-}
+
 
