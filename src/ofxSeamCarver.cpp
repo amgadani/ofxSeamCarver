@@ -1,6 +1,6 @@
 #include "ofxSeamCarver.h"
 
-void ofxSeamCarver::setup(int width, int height, int num_channels) {
+void ofxSeamCarver::setup(int width, int height, ofImageType imgType) {
     gradientShaderString = STRINGIFY(
                                      uniform sampler2DRect pic;
                                      
@@ -17,42 +17,41 @@ void ofxSeamCarver::setup(int width, int height, int num_channels) {
                                      });
     gradientShader.setupShaderFromSource(GL_FRAGMENT_SHADER, gradientShaderString);
     gradientShader.linkProgram();
-
-    components = num_channels;
+    
+    imageType = imgType;
     
 
 
 }
 
-unsigned char * ofxSeamCarver::seamCarve(ofImage img, bool x, bool y) {
-    cout << img.width << " " << img.height << " \n";
-    unsigned char * pixels = img.getPixels();
-    int width = img.width;
-    int height = img.height;
-    pix.allocate(width, height, img.bpp/8);
-    if (x) {
-        gradientFbo.allocate(width, height, GL_RGB);
+ofPixels ofxSeamCarver::seamCarve(ofImage img, bool x, bool y) {
+    ofPixels pixels = img.getPixels();
+    cout << img.getWidth() << " " << img.getHeight() << "\t" << pixels.size() << "\t" <<pixels.getWidth() << " " << pixels.getHeight() <<" \n";
 
+    int width = img.getWidth();
+    int height = img.getHeight();
+    pix.allocate(width, height, imageType);
+    vPix.allocate(width, height, imageType);
+    gradientFbo.allocate(width, height, GL_RGB32F_ARB);
+    if (x) {
         computeGradient(pixels, width, height, gradientFbo);
         float * verticalSeams = computeVerticalSeamFitness(gradientFbo,width, height);
         pixels = removeVerticalSeam(pixels, verticalSeams, width--, height);
     }
     if (y) {
-        gradientFbo.allocate(width, height, GL_RGB);
-
         computeGradient(pixels, width, height, gradientFbo);
         float * horizontalSeams = computeHorizontalSeamFitness(gradientFbo,width, height);
         pixels = removeHorizontalSeam(pixels, horizontalSeams, width, height--);
 
     }
     pix.clear();
+    vPix.clear();
     return pixels;
-    
 }
 
-void ofxSeamCarver::computeGradient(unsigned char * pixels, int width, int height, ofFbo gradFbo) {
+void ofxSeamCarver::computeGradient(ofPixels pixels, int width, int height, ofFbo gradFbo) {
     ofTexture texture;
-    texture.loadData(pixels, width, height, GL_RGB);
+    texture.loadData(pixels);
     gradFbo.begin();
     gradientShader.begin();
     gradientShader.setUniformTexture("pic", texture, 1);
@@ -62,19 +61,23 @@ void ofxSeamCarver::computeGradient(unsigned char * pixels, int width, int heigh
 }
 
 float * ofxSeamCarver::computeVerticalSeamFitness(ofFbo gradFbo, int width, int height) {
-    gradFbo.getTextureReference().readToPixels(pix);
-    int channels = pix.getNumChannels();
+    cout<<"vertical\n";
+    gradFbo.readToPixels(vPix);
+    
+    cout << gradFbo.getWidth() << "\t" << gradFbo.getHeight() << "   " << vPix.getWidth() << "\t" << vPix.getHeight() << "\n";
+
+    
     int w = width;
     int h = height;
 
     float * seamFitness = new float[w*h];
     for (int x = 0; x < w; x++) {
-        seamFitness[x] = pix[x*channels];
+        seamFitness[x] = vPix.getColor(x, 0).getBrightness();
     }
     for (int y = 1; y < h; y++) {
         for (int x = 0; x < w; x++) {
             int index = x + w * y;
-            seamFitness[index] = pix[index*channels];
+            seamFitness[index] = vPix.getColor(x,y).getBrightness();
             int left = max(x - 1,0) + w * (y-1);
             int right = min(x + 1, w-1) + w * (y-1);
             int center = x + w * (y-1);
@@ -82,23 +85,28 @@ float * ofxSeamCarver::computeVerticalSeamFitness(ofFbo gradFbo, int width, int 
         }
     }
     //pix.clear();
+    
+    cout << w << "\t" << h << "\n";
+
     return seamFitness;
 }
 
 float * ofxSeamCarver::computeHorizontalSeamFitness(ofFbo gradFbo, int width, int height) {
-    gradFbo.getTextureReference().readToPixels(pix);
-    int channels = pix.getNumChannels();
+    cout<<"horizontal\n";
+    gradFbo.readToPixels(pix);
+    
+    
     int w = width;
     int h = height;
 
     float * seamFitness = new float[w*h];
     for (int y = 0; y < h; y++) {
-        seamFitness[y*w] = pix[y*w*channels];
+        seamFitness[y*w] = pix.getColor(w, y).getBrightness();
     }
     for (int x = 1; x < w; x++) {
         for (int y = 0; y < h; y++) {
             int index = x + w * y;
-            seamFitness[index] = pix[index*channels];
+            seamFitness[index] = pix.getColor(x,y).getBrightness();
             int below = x-1 + min(y+1,h-1)*w;
             int above = x-1 + max(y-1,0)*w;
             int center = x-1 + w * y;
@@ -109,8 +117,10 @@ float * ofxSeamCarver::computeHorizontalSeamFitness(ofFbo gradFbo, int width, in
     return seamFitness;
 }
 
-unsigned char * ofxSeamCarver::removeVerticalSeam(unsigned char * pixels, float * seamFitness, int w, int h) {
-    unsigned char * trimmed = new unsigned char[(w-1)* h * components];
+ofPixels ofxSeamCarver::removeVerticalSeam(ofPixels pixels, float * seamFitness, int w, int h) {
+    ofPixels trimmed;
+    trimmed.allocate(w-1,h, imageType);
+    
     int minColumn = 0;
     for (int i = 0 ;  i < w; i++) {
         if(seamFitness[minColumn + w*(h-1)] > seamFitness[i+ w*(h-1)])
@@ -126,13 +136,10 @@ unsigned char * ofxSeamCarver::removeVerticalSeam(unsigned char * pixels, float 
                 skippedColumn = true;
                 
             }
-            int newIndex = (x + y*(w-1)) * components;
-            int oldIndex = ((skippedColumn ? x+1 : x) + y*w) * components;
-
-
-            trimmed[newIndex] = pixels[oldIndex];
-            trimmed[newIndex+1] = pixels[oldIndex+1];
-            trimmed[newIndex+2] = pixels[oldIndex+2];
+            int newIndex = (x + y*(w-1));
+            int oldIndex = (skippedColumn ? x+1 : x) + y*w;
+            
+            trimmed.setColor(x, y, pixels.getColor(skippedColumn ? x+1 : x, y));
         }
         
         if (y > 0) {
@@ -147,8 +154,9 @@ unsigned char * ofxSeamCarver::removeVerticalSeam(unsigned char * pixels, float 
     return trimmed;
 }
 
-unsigned char * ofxSeamCarver::removeHorizontalSeam(unsigned char * pixels, float * seamFitness, int w, int h) {
-    unsigned char * trimmed = new unsigned char[w * (h-1) * components];
+ofPixels ofxSeamCarver::removeHorizontalSeam(ofPixels pixels, float * seamFitness, int w, int h) {
+    ofPixels trimmed;
+    trimmed.allocate(w,h-1, imageType);
     
     int minRow = 0;
     for (int i = 0 ;  i < h; i++) {
@@ -164,11 +172,10 @@ unsigned char * ofxSeamCarver::removeHorizontalSeam(unsigned char * pixels, floa
             if (y == minRow) {
                 skippedBestRow = true;
             }
-            int newIndex = (x + y*w) * components;
-            int oldIndex = (x + (skippedBestRow ? y+1 : y)*w) * components;
-            trimmed[newIndex] = pixels[oldIndex];
-            trimmed[newIndex+1] = pixels[oldIndex+1];
-            trimmed[newIndex+2] = pixels[oldIndex+2];
+            int newIndex = (x + y*w);
+            int oldIndex = (x + (skippedBestRow ? y+1 : y)*w);
+            
+            trimmed.setColor(x, y, pixels.getColor(x, skippedBestRow ? y+1 : y));
         }
         if (x > 0) {
             float theMin = seamFitness[x-1+w*(minRow)];
