@@ -11,6 +11,6 @@ public:
     //void mousePressed(int x, int y, int button);
     
     ofImage img, drawn;
+    ofTexture fitnessData;
     ofxSeamCarver seamCarver;
-    
 };
